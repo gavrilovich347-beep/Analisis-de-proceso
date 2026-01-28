@@ -1,0 +1,73 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+from fpdf import FPDF
+import base64
+
+# Configuración de página para móviles
+st.set_page_config(page_title="Analizador SPC", layout="centered")
+
+# --- FUNCIONES DE APOYO ---
+def generar_pdf(col_name, cp, cpk, estado):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(200, 10, txt="Informe de Capacidad de Proceso", ln=True, align='C')
+    pdf.set_font("Arial", size=12)
+    pdf.ln(10)
+    pdf.cell(200, 10, txt=f"Variable analizada: {col_name}", ln=True)
+    pdf.cell(200, 10, txt=f"Indice Cp: {cp:.2f}", ln=True)
+    pdf.cell(200, 10, txt=f"Indice Cpk: {cpk:.2f}", ln=True)
+    pdf.cell(200, 10, txt=f"Estado del proceso: {estado}", ln=True)
+    return pdf.output(dest='S').encode('latin-1')
+
+# --- INTERFAZ ---
+st.title("📈 SPC Mobile Analyzer")
+
+uploaded_file = st.file_uploader("Subir datos (Excel/CSV)", type=['csv', 'xlsx'])
+
+if uploaded_file:
+    df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
+    col_name = st.selectbox("Variable", df.columns)
+    
+    # Límites
+    lsl = st.number_input("LSL", value=float(df[col_name].min()))
+    usl = st.number_input("USL", value=float(df[col_name].max()))
+
+    # Cálculos rápidos
+    mu = df[col_name].mean()
+    sigma = df[col_name].std()
+    cp = (usl - lsl) / (6 * sigma)
+    cpk = min((usl - mu)/(3 * sigma), (mu - lsl)/(3 * sigma))
+    estado = "Capaz" if cpk >= 1.33 else "No Capaz"
+
+    # Mostrar resultados en tarjetas (mejor para móvil)
+    st.metric("Cpk", f"{cpk:.2f}", delta=estado)
+
+    # --- BOTONES DE ACCIÓN ---
+    col_btn1, col_btn2 = st.columns(2)
+
+    with col_btn1:
+        if st.button("💾 Guardar Resultados"):
+            nuevo_registro = pd.DataFrame([[col_name, cp, cpk, estado]], 
+                                         columns=['Variable', 'Cp', 'Cpk', 'Estado'])
+            # Guardar en un CSV persistente
+            nuevo_registro.to_csv("historial_resultados.csv", mode='a', header=False, index=False)
+            st.success("¡Guardado!")
+
+    with col_btn2:
+        pdf_bytes = generar_pdf(col_name, cp, cpk, estado)
+        st.download_button(
+            label="📄 Descargar PDF",
+            data=pdf_bytes,
+            file_name="informe_proceso.pdf",
+            mime="application/pdf"
+        )
+
+    # Mostrar Historial
+    if st.checkbox("Ver historial guardado"):
+        try:
+            historial = pd.read_csv("historial_resultados.csv", names=['Variable', 'Cp', 'Cpk', 'Estado'])
+            st.table(historial.tail(5))
+        except:
+            st.warning("Aún no hay registros.")
